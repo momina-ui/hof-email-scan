@@ -42,23 +42,28 @@ const SETTINGS = {
   APPLICATION_STATUS_ALLOWED: ["In Progress", "In Process"],
 
   // ---- windows ----
-  // How many HOURS back to scan emails for tone. Type any number in the workflow.
-  SCAN_HOURS: (() => {
-    const raw = String(process.env.HOURS_INPUT ?? "24").trim().toLowerCase();
-    if (!raw) return 24;
-    if (raw === "any" || raw === "0") return 0;
+  // WHICH DEALS ARE SCANNED: only files the case manager has TOUCHED in the last N
+  // hours. Nothing older is looked at. Type any number in the workflow.
+  TOUCHED_WITHIN_HOURS: (() => {
+    const raw = String(process.env.HOURS_INPUT ?? "48").trim().toLowerCase();
+    if (!raw) return 48;
+    if (raw === "any" || raw === "0") return 0;      // 0 = no limit (not recommended)
     const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
-    return Number.isFinite(n) && n > 0 ? n : 24;
+    return Number.isFinite(n) && n > 0 ? n : 48;
   })(),
-  SCAN_HOURS_RAW: String(process.env.HOURS_INPUT ?? "24").trim(),
+  TOUCHED_WITHIN_HOURS_RAW: String(process.env.HOURS_INPUT ?? "48").trim(),
 
-  // How far back to look for client emails that were never replied to.
-  REPLY_LOOKBACK_HOURS: 168,      // 7 days
+  // Each check has its own touch window, inside the overall one above:
+  //   unanswered emails -> deals touched in the last 48 hours
+  //   missing task      -> deals touched in the last 24 hours
+  REPLY_TOUCH_HOURS: 48,
+  TASK_TOUCH_HOURS: 24,
+
+  // How far back to read the email history on those deals when looking for a client
+  // email that was never answered. This does NOT widen which deals are scanned.
+  REPLY_LOOKBACK_HOURS: 168,      // 7 days of history
   REPLY_DUE_HOURS: 24,            // overdue after this
   REPLY_CRITICAL_HOURS: 48,       // seriously overdue after this
-
-  // A deal touched in the last N hours with no open task on it.
-  TASK_TOUCH_HOURS: 2,
 
   // ---- limits ----
   MAX_DEALS: (() => { const r = (process.env.LIMIT_INPUT || "all").toLowerCase(); if (!r || r === "all" || r === "0") return 0; const n = parseInt(r, 10); return n > 0 ? n : 0; })(),
