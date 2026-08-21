@@ -1,0 +1,9 @@
+{
+  "name": "hubspot-email-scan",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scans case manager emails for tone, unanswered clients and missing tasks.",
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "node email-scan.js", "test": "node selftest.js" }
+}

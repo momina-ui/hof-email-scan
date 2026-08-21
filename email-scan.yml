@@ -1,0 +1,67 @@
+name: Email Scan
+
+on:
+  schedule:
+    # 06:00 UTC = 11:00 AM PKT
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (scan and print, send no email)?"
+        required: true
+        type: choice
+        default: "true"
+        options:
+          - "true"
+          - "false"
+      hours_back:
+        description: "How many HOURS of email to scan for tone. Type any number: 2, 12, 24, 72."
+        required: true
+        default: "24"
+        type: string
+      limit:
+        description: "How many deals to scan"
+        required: true
+        type: choice
+        default: "all"
+        options:
+          - "all"
+          - "25"
+          - "50"
+          - "100"
+          - "250"
+          - "500"
+      from_email:
+        description: "Sender. Keep onboarding@resend.dev unless hofmigration.com is verified in Resend."
+        required: true
+        type: choice
+        default: "onboarding@resend.dev"
+        options:
+          - "onboarding@resend.dev"
+          - "noreply@hofmigration.com"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check the scan rules still work
+        run: node selftest.js
+      - run: node email-scan.js
+        env:
+          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          RESEND_KEY: ${{ secrets.RESEND_KEY }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          HOURS_INPUT: ${{ inputs.hours_back }}
+          LIMIT_INPUT: ${{ inputs.limit }}
+          FROM_EMAIL: ${{ inputs.from_email }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: email-scan-report
+          path: email-scan-report.html
