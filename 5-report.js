@@ -32,12 +32,13 @@ function buildReport({ clientTone, staffTone, noReply, noTask, scanned, cmCount,
 
   const replyRows = noReply.map((f, i, a) => line(f, i, a, [
     `<strong style="color:${f.severity === "high" ? "#c0392b" : "#b9770e"};">${f.hours}h without a reply</strong>` +
-    `${f.count > 1 ? ` &middot; ${f.count} unanswered emails` : ""}`,
+    `${f.asks ? ` &mdash; client asks: ${T.esc(f.asks)}` : ""}` +
+    `${f.count > 1 ? ` &middot; ${f.count} unanswered` : ""}`,
     `subject: ${T.esc(f.subject || "(none)")} &middot; received ${stamp(f.when)}`,
   ]));
 
   const taskRows = noTask.map((f, i, a) => line(f, i, a, [
-    `Worked ${f.minutesAgo} minute(s) ago with no open task${f.hadCompleted ? " (previous task completed)" : ""}`,
+    `Worked ${f.hoursAgo >= 1 ? `${f.hoursAgo} hour(s)` : `${f.minutesAgo} minute(s)`} ago with no open task${f.hadCompleted ? " (previous task completed)" : ""}`,
   ]));
 
   const total = clientTone.length + staffTone.length + noReply.length + noTask.length;
