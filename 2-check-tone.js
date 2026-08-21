@@ -1,16 +1,18 @@
-// 2-check-tone.js — reads the emails and flags the ones that need a human eye.
+// 2-check-tone.js — flags only the emails that genuinely need a human eye.
 //
-// INCOMING (from the client): angry, rude, asking for a refund, or disappointed.
-// OUTGOING (from us): angry, rude or unprofessional toward the client.
+// DELIBERATELY NARROW. Early runs flagged ordinary chasing and mild impatience,
+// which buries the real problems. The bar now is: would a manager reading this
+// stop and step in? If not, it is not a flag.
 //
-// Only text is read — attachments and images are invisible. Quoted history is
-// trimmed so an old angry line in a reply chain is not counted again and again.
+// INCOMING (client): explicit anger, explicit rudeness/insult, an actual REFUND
+// demand, or explicit strong disappointment in HOF.
+// OUTGOING (us): genuinely rude, sarcastic, dismissive or aggressive wording.
+//
+// Only email text is read; attachments and images are invisible. Quoted history is
+// trimmed so an old angry line does not re-flag on every reply in the thread.
 const { SETTINGS } = require("./config");
+const { askJson, usage } = require("./0-ai");
 
-let aiCalls = 0;
-const budgetLeft = () => aiCalls < SETTINGS.MAX_AI_CALLS;
-
-// cut quoted history: "On ... wrote:", ">" lines, common separators
 function freshPart(text) {
   let t = String(text || "");
   const cuts = [/On .{0,60}wrote:/i, /-----Original Message-----/i, /From:.{0,80}Sent:/i, /_{10,}/];
@@ -18,40 +20,53 @@ function freshPart(text) {
   return t.split(/\n/).filter((l) => !/^\s*>/.test(l)).join("\n").trim();
 }
 
-async function judge(kind, subject, body) {
-  if (!process.env.GEMINI_KEY || !budgetLeft()) return null;
-  aiCalls++;
-  const prompt = kind === "incoming"
-    ? `You review emails a client sent to an immigration consultancy. Decide if THIS client email shows any of: anger, rudeness, a REFUND request, or clear disappointment/frustration.
+const INCOMING_PROMPT = (subject, body) => `You review an email a CLIENT sent to an immigration consultancy. Flag it ONLY if it clearly needs a manager to step in today.
 
-Be strict. A normal question, a chase for an update, or a neutral complaint about timelines is NOT a flag. Flag only genuine anger, rudeness, a refund demand, or clear disappointment.
+FLAG only when one of these is unmistakable:
+- ANGRY: the client is plainly angry — shouting, ALL CAPS anger, insults, threats to complain, threats of legal action or a bad review.
+- RUDE: the client is insulting or abusive toward staff.
+- REFUND: the client actually asks for their money back, or to cancel and be refunded.
+- DISAPPOINTED: the client states clear, strong dissatisfaction with HOF's service — for example "very poor service", "extremely disappointed", "worst experience", "you have wasted my time".
+
+DO NOT FLAG any of these, they are normal business email:
+- asking for an update, however many times, even "any update?" or "still waiting"
+- mild impatience, urgency, or worry about timelines
+- questions, requests for documents, or chasing a reply
+- frustration aimed at the embassy, the government, IRCC, USCIS or a delay outside HOF
+- neutral or factual complaints without strong emotional language
+- bad news, cancellations for personal reasons, or a client saying they cannot continue
+- anything you are unsure about
+
+Be conservative. If it is borderline, answer false.
 
 Subject: ${String(subject || "").slice(0, 200)}
 Body:
 """${String(body || "").slice(0, 2500)}"""
 
-Reply ONLY JSON: {"flag": true|false, "category": "angry"|"rude"|"refund"|"disappointed"|"", "severity": "high"|"medium", "quote": "<max 15 words from the client>"}`
-    : `You review emails our consultancy staff sent to a client. Decide if THIS email is angry, rude, dismissive or unprofessional toward the client.
+Reply ONLY JSON: {"flag": true|false, "category": "angry"|"rude"|"refund"|"disappointed"|"", "confidence": "high"|"low", "quote": "<the exact words that prove it, max 15 words>"}`;
 
-Be strict. Being firm, brief, or delivering bad news politely is NOT a flag. Flag only genuinely rude, sarcastic, dismissive or aggressive wording.
+const OUTGOING_PROMPT = (subject, body) => `You review an email OUR OWN STAFF sent to a client. Flag it ONLY if the wording is genuinely unprofessional toward the client.
+
+FLAG only when unmistakable:
+- RUDE or insulting wording, sarcasm, or talking down to the client
+- DISMISSIVE: blaming or scolding the client, e.g. "I already told you", "you never read my emails"
+- AGGRESSIVE or threatening tone
+
+DO NOT FLAG:
+- short, blunt or businesslike replies
+- firm chasing for documents or payment, stated politely
+- delivering bad news, refusals or deadlines politely
+- imperfect English, typos, or missing pleasantries
+- templates and standard process emails
+- anything borderline
+
+Be conservative. If it is borderline, answer false.
 
 Subject: ${String(subject || "").slice(0, 200)}
 Body:
 """${String(body || "").slice(0, 2500)}"""
 
-Reply ONLY JSON: {"flag": true|false, "category": "angry"|"rude"|"unprofessional"|"", "severity": "high"|"medium", "quote": "<max 15 words from the email>"}`;
-
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${SETTINGS.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
-      { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0 } }) });
-    const t = (await res.json())?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const m = t.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const j = JSON.parse(m[0]);
-    return j.flag ? j : null;
-  } catch { return null; }
-}
+Reply ONLY JSON: {"flag": true|false, "category": "rude"|"dismissive"|"aggressive"|"", "confidence": "high"|"low", "quote": "<the exact words that prove it, max 15 words>"}`;
 
 module.exports = async function checkTone(d, windowStart) {
   if (!d.available.emails) return [];
@@ -60,23 +75,26 @@ module.exports = async function checkTone(d, windowStart) {
 
   for (const e of recent) {
     const body = freshPart(e.text);
-    if (body.replace(/\s+/g, "").length < 25) continue;          // nothing readable
+    if (body.replace(/\s+/g, "").length < 25) continue;
 
-    if (e.incoming && SETTINGS.CHECK_INCOMING_TONE) {
-      const j = await judge("incoming", e.subject, body);
-      if (j) findings.push({
-        type: "client", category: j.category || "concern", severity: j.severity || "medium",
-        subject: e.subject, when: e.when, quote: j.quote || "",
-      });
-    } else if (!e.incoming && SETTINGS.CHECK_OUTGOING_TONE) {
-      const j = await judge("outgoing", e.subject, body);
-      if (j) findings.push({
-        type: "staff", category: j.category || "tone", severity: j.severity || "medium",
-        subject: e.subject, when: e.when, quote: j.quote || "",
-      });
-    }
+    const incoming = e.incoming;
+    if (incoming && !SETTINGS.CHECK_INCOMING_TONE) continue;
+    if (!incoming && !SETTINGS.CHECK_OUTGOING_TONE) continue;
+
+    const j = await askJson(incoming ? INCOMING_PROMPT(e.subject, body) : OUTGOING_PROMPT(e.subject, body));
+    if (!j || !j.flag) continue;
+    // only act on confident findings, and only when it can point at the actual words
+    if (String(j.confidence || "").toLowerCase() !== "high") continue;
+    if (!String(j.quote || "").trim()) continue;
+
+    findings.push({
+      type: incoming ? "client" : "staff",
+      category: j.category || (incoming ? "concern" : "tone"),
+      severity: incoming && /refund|angry/i.test(j.category || "") ? "high" : incoming ? "medium" : "high",
+      subject: e.subject, when: e.when, quote: j.quote,
+    });
   }
   return findings;
 };
 module.exports.freshPart = freshPart;
-module.exports.aiUsage = () => aiCalls;
+module.exports.aiUsage = usage;
