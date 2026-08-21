@@ -4,8 +4,10 @@
 const { hub, assocIds, batchRead, strip, when } = require("./0-hubspot");
 const { SETTINGS } = require("./config");
 
+// Only deals the case manager has TOUCHED within this window are scanned at all.
+// (The reply check still reads older email history, but only on these deals.)
 function lookbackStart() {
-  const hours = Math.max(SETTINGS.REPLY_LOOKBACK_HOURS || 0, SETTINGS.SCAN_HOURS || 0, SETTINGS.TASK_TOUCH_HOURS || 0);
+  const hours = SETTINGS.TOUCHED_WITHIN_HOURS || 0;
   return hours ? Date.now() - hours * 3600000 : 0;
 }
 
