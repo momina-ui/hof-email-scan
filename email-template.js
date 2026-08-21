@@ -17,7 +17,7 @@ const C = {
   warnBg: "#fff4e5",
   warnBar: "#f5a623",
   okBg: "#eaf6ec",
-  okBar: "#45a1
+  okBar: "#45a163",
   font: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif",
 };
 
