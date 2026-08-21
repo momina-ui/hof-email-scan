@@ -22,14 +22,16 @@ async function main() {
   if (!process.env.HUBSPOT_TOKEN) throw new Error("Missing HUBSPOT_TOKEN");
   console.log(`=== HOF Email Scan — ${new Date().toISOString()} ===  DRY_RUN=${SETTINGS.DRY_RUN}`);
 
-  if (SETTINGS.SCAN_HOURS_RAW && !/^(any|0)$/i.test(SETTINGS.SCAN_HOURS_RAW) && !Number.isFinite(parseFloat(SETTINGS.SCAN_HOURS_RAW)))
-    console.log(`NOTE: "${SETTINGS.SCAN_HOURS_RAW}" is not a number of hours — using 24.`);
+  const raw = SETTINGS.TOUCHED_WITHIN_HOURS_RAW;
+  if (raw && !/^(any|0)$/i.test(raw) && !Number.isFinite(parseFloat(raw)))
+    console.log(`NOTE: "${raw}" is not a number of hours — using 48.`);
 
-  const windowStart = SETTINGS.SCAN_HOURS ? Date.now() - SETTINGS.SCAN_HOURS * 3600000 : 0;
-  const windowLabel = SETTINGS.SCAN_HOURS ? `last ${SETTINGS.SCAN_HOURS} hour(s)` : "any time";
-  console.log(`Tone scan window: ${windowLabel}`);
-  console.log(`Unanswered lookback: ${SETTINGS.REPLY_LOOKBACK_HOURS}h (overdue ${SETTINGS.REPLY_DUE_HOURS}h, critical ${SETTINGS.REPLY_CRITICAL_HOURS}h)`);
-  console.log(`Recent-touch task check: ${SETTINGS.TASK_TOUCH_HOURS}h`);
+  const windowStart = SETTINGS.TOUCHED_WITHIN_HOURS ? Date.now() - SETTINGS.TOUCHED_WITHIN_HOURS * 3600000 : 0;
+  const windowLabel = SETTINGS.TOUCHED_WITHIN_HOURS ? `touched in the last ${SETTINGS.TOUCHED_WITHIN_HOURS} hour(s)` : "any time";
+  console.log(`Deals scanned: files ${windowLabel} — nothing older is looked at`);
+  console.log(`  unanswered emails : deals touched in the last ${SETTINGS.REPLY_TOUCH_HOURS}h, overdue after ${SETTINGS.REPLY_DUE_HOURS}h (critical ${SETTINGS.REPLY_CRITICAL_HOURS}h)`);
+  console.log(`  missing task      : deals touched in the last ${SETTINGS.TASK_TOUCH_HOURS}h`);
+  console.log(`  a reply is only chased when the email actually needed one`);
 
   const transport = await checkTransport();
   console.log(transport.ok ? `Transport: Resend OK (from ${SETTINGS.FROM_EMAIL} to ${SETTINGS.REPORT_TO})` : `!! CANNOT SEND THE REPORT — ${transport.reason}`);
@@ -47,7 +49,7 @@ async function main() {
   const NAME = Object.fromEntries(managers.map((m) => [m.id, m.name]));
 
   const deals = await fetchDeals(managers.map((m) => m.id));
-  console.log(`Deals to scan (Active + application in progress): ${deals.length}`);
+  console.log(`Deals to scan (Active + application in progress, ${windowLabel}): ${deals.length}`);
 
   const clientTone = [], staffTone = [], noReply = [], noTask = [];
   let scanned = 0, skippedStatus = 0;
@@ -72,7 +74,7 @@ async function main() {
       }
     } catch (e) { console.log(`tone error ${d.id}: ${e.message}`); }
 
-    for (const f of checkReply(d)) noReply.push({ ...base, ...f });
+    for (const f of await checkReply(d)) noReply.push({ ...base, ...f });
     for (const f of checkTask(d)) noTask.push({ ...base, ...f });
   }
 
@@ -87,7 +89,7 @@ async function main() {
   console.log(`  our emails flagged    : ${staffTone.length}`);
   console.log(`  not answered in time  : ${noReply.length}`);
   console.log(`  no task after working : ${noTask.length}`);
-  console.log(`  AI calls used         : ${checkTone.aiUsage()}${checkTone.aiUsage() >= SETTINGS.MAX_AI_CALLS ? " (budget reached)" : ""}`);
+  console.log(`  AI calls used         : ${require("./0-ai").usage()}${require("./0-ai").usage() >= SETTINGS.MAX_AI_CALLS ? " (budget reached)" : ""}`);
 
   const perManager = {};
   for (const f of [...clientTone, ...staffTone, ...noReply, ...noTask]) perManager[f.manager] = (perManager[f.manager] || 0) + 1;
@@ -102,7 +104,7 @@ async function main() {
   };
   show("CLIENT EMAILS FLAGGED", clientTone, (f) => `[${f.severity}] ${f.category}${f.quote ? ` — "${f.quote}"` : ""}  (subject: ${f.subject})`);
   show("OUR EMAILS FLAGGED", staffTone, (f) => `[${f.severity}] ${f.category}${f.quote ? ` — "${f.quote}"` : ""}  (subject: ${f.subject})`);
-  show("NOT ANSWERED IN TIME", noReply, (f) => `${f.hours}h without a reply — "${f.subject}"`);
+  show("NOT ANSWERED IN TIME", noReply, (f) => `${f.hours}h without a reply${f.asks ? ` — client asks: ${f.asks}` : ""} — "${f.subject}"`);
   show("NO TASK AFTER WORKING", noTask, (f) => `worked ${f.minutesAgo} min ago, no open task`);
 
   // ---- report ----
