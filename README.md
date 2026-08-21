@@ -15,8 +15,17 @@ Only the email address is configured — the owner IDs are looked up in HubSpot 
 time, and any address that does not resolve is named in the log.
 
 **Only these deals are scanned:**
+- **Touched by the case manager recently** — nothing older is looked at
 - Client Status = **Active**
 - Application Status = **In Progress** *or* **In Process**
+
+Each check has its own touch window:
+
+| Check | Deals touched within |
+|---|---|
+| Unanswered client emails | **48 hours** |
+| Missing task | **24 hours** |
+| Email tone | the fetch window (hours box, default 48) |
 
 Every other status is skipped. (The portal genuinely has both "In Progress" and
 "In Process" as separate values, so both are accepted — otherwise half the files
@@ -28,12 +37,15 @@ would be missed.)
 
 | # | Check | Rule |
 |---|---|---|
-| 1 | **Client email tone** | An incoming email showing anger, rudeness, a **refund request** or clear disappointment. Flagged high or medium. |
-| 2 | **Our email tone** | An outgoing email that is angry, rude, dismissive or unprofessional. |
-| 3 | **Not answered in time** | A client email with no reply after it: overdue at **24h**, serious at **48h**. Only the oldest unanswered email per file is reported. |
-| 4 | **No task after working** | The file was worked in the **last 2 hours** but has no open task. Completed tasks don't count. |
+| 1 | **Client email tone** | Only unmistakable cases: explicit anger, insults, an actual **refund demand**, or strong stated dissatisfaction with HOF. Chasing for updates, impatience, and frustration at embassies or delays are **not** flagged. |
+| 2 | **Our email tone** | Only genuinely rude, sarcastic, dismissive or aggressive wording. Blunt, firm or bad-news emails are **not** flagged. |
+| 3 | **Not answered in time** | A client email that **actually needed a reply** and did not get one: overdue at **24h**, serious at **48h**. Thank-yous, acknowledgements, auto-replies and plain document drops are never chased — the email is read first to decide whether an answer was required. |
+| 4 | **No task after working** | The file was worked in the **last 24 hours** but has no open task. Completed tasks don't count. |
 
 Every finding carries a **direct deal link**.
+
+Both tone checks require **high confidence plus the exact words** that prove it, and
+the report shows that quote — so every flag can be judged in a second.
 
 Notes on accuracy: only email **text** is read — attachments and screenshots are
 invisible. Quoted history is trimmed before the AI reads an email, so an old angry
@@ -50,7 +62,7 @@ is not a flag.
 | Input | Choices |
 |---|---|
 | Dry run | `true` = scan and print, send nothing · `false` = send the report |
-| Hours back | **Type any number** of hours of email to scan for tone. Default 24. |
+| Hours back | **Type any number** of hours. Only deals touched within that window are scanned. Default 48. |
 | How many deals | all / 25 / 50 / 100 / 250 / 500 |
 | Sender | `onboarding@resend.dev` (default) or `noreply@hofmigration.com` |
 
@@ -83,7 +95,7 @@ No npm packages are installed — the agent runs on plain Node.
 
 ## Tuning (`config.js`)
 
-`REPLY_DUE_HOURS` (24) · `REPLY_CRITICAL_HOURS` (48) · `REPLY_LOOKBACK_HOURS` (168) ·
+`REPLY_DUE_HOURS` (24) · `REPLY_CRITICAL_HOURS` (48) · `TOUCHED_WITHIN_HOURS` (48, from the hours box) · `REPLY_TOUCH_HOURS` (48) · `TASK_TOUCH_HOURS` (24) · `REPLY_LOOKBACK_HOURS` (168, email history on those deals) ·
 `TASK_TOUCH_HOURS` (2) · `MAX_EMAILS_PER_DEAL` (8) · `MAX_AI_CALLS` (400) ·
 `CHECK_INCOMING_TONE` · `CHECK_OUTGOING_TONE` · `CHECK_REPLY_TIME` ·
 `CHECK_TASK_AFTER_TOUCH` · `CASE_MANAGERS` · `REPORT_TO` · `REPORT_CC` (empty by default — add addresses to copy others in)
@@ -94,5 +106,5 @@ If the cap is hit, the log says so — lower `MAX_EMAILS_PER_DEAL` or the hours 
 ## Changing the rules
 
 Every rule is a scenario in `selftest.js`. Run `node selftest.js` after any edit —
-it reports `25 passed, 0 failed` and names anything that broke. The workflow runs it
+it reports `35 passed, 0 failed` and names anything that broke. The workflow runs it
 before scanning, so a broken rule stops the run instead of producing a wrong report.
