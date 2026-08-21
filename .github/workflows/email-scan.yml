@@ -15,9 +15,9 @@ on:
           - "true"
           - "false"
       hours_back:
-        description: "How many HOURS of email to scan for tone. Type any number: 2, 12, 24, 72."
+        description: "Scan deals the case manager TOUCHED in the last N hours. Type any number: 6, 12, 24, 48."
         required: true
-        default: "24"
+        default: "48"
         type: string
       limit:
         description: "How many deals to scan"
